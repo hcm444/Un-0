@@ -55,14 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dataset", default="uoft-cs/cifar10")
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--epochs", type=int, default=2400)
+    parser.add_argument("--epochs", type=int, default=1200)
     parser.add_argument("--batch-size", type=int, default=2048)
-    parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--lr", type=float, default=0.0013894955)
     parser.add_argument(
         "--precision", choices=("fp32", "tf32", "bf16", "fp16"), default="bf16"
     )
-    parser.add_argument("--dino-weight", type=float, default=0.911)
-    parser.add_argument("--pixel-weight", type=float, default=0.114)
+    parser.add_argument("--dino-weight", type=float, default=1.0)
+    parser.add_argument("--pixel-weight", type=float, default=0.004)
     parser.add_argument(
         "--parameterization",
         choices=("standard", "mup"),
@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--relativization",
         choices=("absolute", "mean_relative", "ref_oscillator", "pairwise"),
-        default="ref_oscillator",
+        default="mean_relative",
         help="Phase relativization before sin/cos readout encoding.",
     )
     parser.add_argument(
@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--num-steps",
         type=int,
-        default=25,
+        default=10,
         help=(
             "Integration steps in the generator rollout. 0 decodes the random "
             "initial phases directly (decoder-only, no dynamics)."
@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--solver",
         choices=("euler", "rk4"),
-        default="rk4",
+        default="euler",
         help="ODE solver for the dynamics rollout.",
     )
     parser.add_argument(
@@ -139,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--queue-size",
         type=int,
-        default=128,
+        default=2048,
         help="Per-class positive queue capacity. 0 disables the queue.",
     )
     parser.add_argument(
