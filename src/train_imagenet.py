@@ -31,6 +31,7 @@ from tqdm.auto import tqdm
 
 from common import (
     autocast_context,
+    disable_cudnn_sdp_on_blackwell,
     make_scheduler,
     resolve_device,
     save_sample_grid,
@@ -166,6 +167,8 @@ def train(args: argparse.Namespace) -> None:
         local_rank = 0
         device = resolve_device("auto")
     is_main = rank == 0
+
+    disable_cudnn_sdp_on_blackwell()
 
     seed_everything(int(args.seed) + rank)
     if args.precision == "tf32":

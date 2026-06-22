@@ -35,6 +35,26 @@ def resolve_device(device: str) -> torch.device:
     return torch.device(device)
 
 
+# Blackwell (sm_100) and newer; the bundled cuDNN 9.x has no valid SDPA plan.
+_BLACKWELL_SM_MAJOR = 10
+
+
+def disable_cudnn_sdp_on_blackwell() -> None:
+    """Force flash SDPA on Blackwell+ GPUs, where cuDNN attention is broken.
+
+    On Blackwell (sm_100+, e.g. B300 reports sm_103), the cuDNN 9.x bundled with
+    torch 2.11+cu128 has no valid SDPA execution plan, so the compiled DINO
+    attention crashes with "No valid execution plans built". Disabling the cuDNN
+    SDPA backend dispatches to flash instead. Gated on compute capability so
+    pre-Blackwell GPUs (H200, A100) keep cuDNN attention.
+    """
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability()[0] >= _BLACKWELL_SM_MAJOR
+    ):
+        torch.backends.cuda.enable_cudnn_sdp(False)  # noqa: FBT003
+
+
 def save_sample_grid(
     samples: Tensor,
     path: str | Path,
