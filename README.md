@@ -250,31 +250,3 @@ to `outputs/dynamics/best_lr.json`, and each run's FID lands in its own
 `fid.json`. See [`ablation_study/`](ablation_study/) for the runner and
 LR-sweep launcher.
 
-## Repository layout
-
-```
-src/
-  model.py             ConditionalKuramotoDynamics (main block +
-                       cond block + K_drive class-dependent cross-coupling);
-                       ReadoutTransform; ResizeConvDecoder;
-                       ConditionalImplicitKuramotoGenerator;
-                       build_cifar10_model(); build_imagenet64_model()
-  losses.py            Conditional drift loss with γ-mixed other-class negatives;
-                       DINOv2-S/14 feature extractor; conditional_drift_loss;
-                       PerClassQueue for queue-mode positive sampling
-  data.py              HuggingFace-datasets-backed CIFAR-10 dataloader
-  imagenet_data.py     Reference ImageFolder-based ImageNet-64 dataloader
-  common.py            Shared helpers (seed, device, sample grid, LR schedule,
-                       autocast) used by the train/eval/inference entry points
-  train_cifar10.py     CIFAR-10 DDP + W&B training entry point
-  train_imagenet.py    ImageNet-64 DDP + W&B training entry point
-  inference.py         Per-class sampling entry point
-  metrics.py           clean-FID (CIFAR + ImageNet-64), shardable across ranks,
-                       and class-balanced sampling helpers
-  eval.py              CIFAR-10 evaluation entry point: load checkpoint, compute FID
-scripts/
-  imagenet_preprocessing.py    ImageNet → 64×64 reference transform (ADM-comparable)
-  precompute_dino_features.py  Precompute the real-image DINO view bank
-ablation_study/        Dynamics ablation runner, LR-sweep launcher, and plotting script
-tests/                 Unit tests for model, losses, queue, metrics, and data
-```
