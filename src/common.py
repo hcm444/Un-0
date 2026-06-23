@@ -52,6 +52,41 @@ def disable_cudnn_sdp_on_blackwell() -> None:
         torch.backends.cuda.enable_cudnn_sdp(False)  # noqa: FBT003
 
 
+def disable_torchscript_gpu_fuser_on_blackwell() -> None:
+    """Disable the TorchScript GPU fusers on Blackwell+, where NVRTC rejects sm_103.
+
+    clean-fid's FID runs a TorchScript InceptionV3, whose GPU fusers JIT-compile
+    fused CUDA kernels through NVRTC. On Blackwell (sm_100+, e.g. B300 reports
+    sm_103) NVRTC rejects the device arch with "invalid value for
+    --gpu-architecture (compute_103)", crashing FID scoring in both eval.py and
+    the in-training FID (train_cifar10.py / train_imagenet.py). Disabling the
+    fusers makes Inception run eager.
+
+    TorchScript has shipped three GPU fuser backends across torch versions; we
+    turn off all of them so the workaround holds regardless of which is active:
+      - the legacy fuser (``_jit_override_can_fuse_on_gpu``);
+      - the TensorExpr/NNC fuser (the default in torch 2.x), reached via the
+        profiling executor that builds the shape-specialized graphs it fuses --
+        hence also disabling the profiling executor/mode; and
+      - nvfuser (``_jit_set_nvfuser_enabled``), removed from core torch in 2.x,
+        so that symbol may not exist -- the try/except tolerates its absence.
+
+    These flags govern TorchScript only; torch.compile (Inductor) is a separate
+    path and is unaffected, so this is safe to set once at process start. Gated on
+    compute capability so pre-Blackwell GPUs (H200, B200, A100), where the fusers
+    work, keep them.
+    """
+    if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= _BLACKWELL_SM_MAJOR:
+        torch._C._jit_override_can_fuse_on_gpu(False)  # noqa: SLF001, FBT003
+        torch._C._jit_set_profiling_executor(False)  # noqa: SLF001, FBT003
+        torch._C._jit_set_profiling_mode(False)  # noqa: SLF001, FBT003
+        try:
+            torch._C._jit_set_texpr_fuser_enabled(False)  # noqa: SLF001, FBT003
+            torch._C._jit_set_nvfuser_enabled(False)  # noqa: SLF001, FBT003
+        except (AttributeError, RuntimeError):
+            pass
+
+
 def save_sample_grid(
     samples: Tensor,
     path: str | Path,

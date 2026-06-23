@@ -105,6 +105,10 @@ def _score_against_reference(
 
     CIFAR (``real_image_dir`` None) scores against the named ``cifar10`` stats;
     ImageNet builds custom stats from ``real_image_dir`` once, then scores.
+
+    Callers must have disabled the TorchScript GPU fuser on Blackwell+ (via
+    ``common.disable_torchscript_gpu_fuser_on_blackwell``) before reaching here;
+    otherwise clean-fid's TorchScript Inception crashes in NVRTC on sm_103.
     """
     from cleanfid import fid as cleanfid
 

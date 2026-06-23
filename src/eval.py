@@ -8,7 +8,11 @@ from pathlib import Path
 
 import torch
 
-from common import resolve_device, seed_everything
+from common import (
+    disable_torchscript_gpu_fuser_on_blackwell,
+    resolve_device,
+    seed_everything,
+)
 from data import NUM_CLASSES
 from metrics import compute_fid
 from model import build_cifar10_model
@@ -42,6 +46,7 @@ def evaluate(args: argparse.Namespace) -> float:
     """Load checkpoint, compute FID, return the scalar."""
     seed_everything(int(args.seed))
     device = resolve_device("auto")
+    disable_torchscript_gpu_fuser_on_blackwell()
 
     state = torch.load(args.checkpoint, map_location=device, weights_only=False)
     config = state.get("config") or {}
