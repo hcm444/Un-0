@@ -68,14 +68,7 @@ def main() -> None:
                 batch_size=FEATURE_BATCH_SIZE,
                 image_size=int(args.image_size),
             )
-        block = (
-            torch.stack(views, dim=1)
-            .detach()
-            .to(
-                dtype=torch.bfloat16,
-            )
-            .cpu()
-        )
+        block = torch.stack(views, dim=1).detach().to(dtype=torch.bfloat16).cpu()
         if bank is None:
             num_views = int(block.shape[1])
             feat_dim = int(block.shape[2])

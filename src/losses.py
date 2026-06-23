@@ -166,13 +166,7 @@ def conditional_drift_loss_for_views(
             pos_c = pos_stack[:, pos_c_idx, :].detach().to(dtype=compute_dtype)
             gen_c_d = gen_stack[:, gen_c_idx, :].detach().to(dtype=compute_dtype)
             if other_perm is not None:
-                other = (
-                    gamma_stack[:, other_perm, :]
-                    .detach()
-                    .to(
-                        dtype=compute_dtype,
-                    )
-                )
+                other = gamma_stack[:, other_perm, :].detach().to(dtype=compute_dtype)
                 neg_c = torch.cat([gen_c_d, other], dim=1)
             else:
                 neg_c = gen_c_d
