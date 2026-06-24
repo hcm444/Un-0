@@ -13,6 +13,8 @@ from un0.model import (
     PRETRAINED_NAMES,
     ConditionalImplicitKuramotoGenerator,
     build_cifar10_model,
+    build_from_config,
+    build_imagenet64_model,
 )
 
 
@@ -25,6 +27,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--pretrained",
         choices=PRETRAINED_NAMES,
         help="Load released weights from Hugging Face by name.",
+    )
+    parser.add_argument(
+        "--family",
+        choices=("cifar10", "imagenet64"),
+        default="cifar10",
+        help=(
+            "Model family for a local --checkpoint (default: cifar10). "
+            "Ignored with --pretrained, whose family is fixed by name."
+        ),
     )
     parser.add_argument("--output", default="samples/grid.png")
     parser.add_argument(
@@ -52,30 +63,26 @@ def generate(args: argparse.Namespace) -> None:
         model = ConditionalImplicitKuramotoGenerator.from_pretrained(args.pretrained, device=device)
     else:
         state = torch.load(args.checkpoint, map_location=device, weights_only=False)
-        config = state.get("config") or {}
-        # Checkpoints without these config keys were trained with "mup" +
-        # "ref_oscillator"; fall back to those so they load correctly.
-        model = build_cifar10_model(
-            n_oscillators=int(config.get("n_oscillators", 4096)),
-            n_conditional_oscillators=int(config.get("n_conditional_oscillators", 8)),
-            class_dropout_prob=float(config.get("class_dropout_prob", 0.1)),
-            num_steps=int(config.get("num_steps", 25)),
-            decoder_in_channels=(
-                None
-                if config.get("decoder_in_channels") is None
-                else int(config["decoder_in_channels"])
-            ),
-            parameterization=str(config.get("parameterization", "mup")),
-            relativization=str(config.get("relativization", "ref_oscillator")),
-            encoding=str(config.get("encoding", "sin_cos")),
-            solver=str(config.get("solver", "rk4")),
-        ).to(device)
+        # Rebuild the architecture from the checkpoint's own config, selecting the
+        # builder by --family. `build_from_config` passes only the arch keys each
+        # builder accepts and lets absent keys fall back to the builder defaults.
+        build_fn = build_cifar10_model if args.family == "cifar10" else build_imagenet64_model
+        model = build_from_config(build_fn, state.get("config") or {})
         model.load_state_dict(state["model"])
+        model = model.to(device)
 
     classes = torch.tensor(args.classes, device=device, dtype=torch.long)
     class_ids = classes.repeat_interleave(int(args.samples_per_class))
     samples = model.sample(class_ids)
-    save_sample_grid(samples, Path(args.output), nrow=int(args.samples_per_class))
+    # Infer the square image size from the flat (B, 3*H*W) sample width so the
+    # grid reshapes correctly for either family (CIFAR-10 32px, ImageNet-64 64px).
+    image_size = round((samples.shape[1] // 3) ** 0.5)
+    save_sample_grid(
+        samples,
+        Path(args.output),
+        image_size=image_size,
+        nrow=int(args.samples_per_class),
+    )
 
 
 def main() -> None:

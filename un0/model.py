@@ -447,7 +447,7 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
         # released payloads load cleanly under the safe unpickler.
         state = torch.load(path, map_location="cpu", weights_only=True)
         builder = build_cifar10_model if family == "cifar10" else build_imagenet64_model
-        model = _build_from_config(builder, state["config"])
+        model = build_from_config(builder, state["config"])
         model.load_state_dict(state["model"])
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -629,12 +629,16 @@ _PRETRAINED: dict[str, tuple[str, str]] = {
 PRETRAINED_NAMES = tuple(sorted(_PRETRAINED))
 
 
-def _build_from_config(
+def build_from_config(
     builder: Callable[..., ConditionalImplicitKuramotoGenerator],
     config: dict,
 ) -> ConditionalImplicitKuramotoGenerator:
-    # Pass only the arch keys the builder accepts (configs carry many training
-    # keys it does not); absent keys fall back to the builder's own defaults.
+    """Build a model with `builder`, passing only the arch keys it accepts.
+
+    Checkpoint configs carry many training-only keys the builders do not take;
+    those are dropped, and any arch key absent from `config` falls back to the
+    builder's own default.
+    """
     accepted = set(inspect.signature(builder).parameters)
     kwargs = {key: value for key, value in config.items() if key in accepted}
     return builder(**kwargs)
