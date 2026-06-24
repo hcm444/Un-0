@@ -1,5 +1,9 @@
 # Un0
 
+<p align="center">
+  <img src="assets/hero_mosaic.jpg" width="100%" alt="Un0 — mosaic of generated image samples">
+</p>
+
 Un0 is an image-generation model built on
 [Kuramoto dynamics](https://en.wikipedia.org/wiki/Kuramoto_model): it generates
 an image by integrating the phase dynamics of a population of coupled
