@@ -9,6 +9,7 @@ import torch
 
 from un0.apple import (
     apply_inference_preset,
+    autotune_inference_batch_size,
     default_inference_batch_size,
     default_pretrained_checkpoint,
     generate_samples,
@@ -44,9 +45,25 @@ def test_default_pretrained_checkpoint_prefers_quality_on_mps() -> None:
 def test_sample_batched_concatenates_chunks() -> None:
     model = _mock_model()
     model.sample.side_effect = lambda ids: torch.full((ids.shape[0], 3072), float(ids[0].item()))
-    out = sample_batched(model, torch.tensor([0, 1, 2, 3, 4]), batch_size=2)
+    out = sample_batched(model, torch.tensor([0, 1, 2, 3, 4]), batch_size=2, group_by_class=False)
     assert out.shape == (5, 3072)
     assert model.sample.call_count == 3
+
+
+def test_sample_batched_grouped_restores_order() -> None:
+    model = _mock_model()
+    model.sample.side_effect = lambda ids: ids.to(dtype=torch.float32).unsqueeze(-1).expand(-1, 3072)
+    class_ids = torch.tensor([3, 1, 3, 0, 1])
+    out = sample_batched(model, class_ids, batch_size=2, group_by_class=True)
+    assert out.shape == (5, 3072)
+    for row, label in zip(out[:, 0], class_ids, strict=True):
+        assert float(row) == float(label)
+
+
+def test_autotune_batch_size_on_cpu_returns_default() -> None:
+    model = _mock_model(n_oscillators=4096)
+    size = autotune_inference_batch_size(model, torch.device("cpu"))
+    assert size == default_inference_batch_size(model)
 
 
 def test_sample_batched_rejects_empty_ids() -> None:

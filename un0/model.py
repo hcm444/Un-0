@@ -138,6 +138,14 @@ class ConditionalKuramotoDynamics(nn.Module):
             self._coupling_cache_valid = True
         return K, K_cond
 
+    def bake_coupling_cache(self) -> None:
+        """Precompute and register diagonal-free coupling matrices for inference."""
+        K = (self.K - torch.diag_embed(self.K.diagonal())) * self._K_scale
+        K_cond = (self.K_cond - torch.diag_embed(self.K_cond.diagonal())) * self._K_cond_scale
+        self.register_buffer("_K_eff", K.detach(), persistent=False)
+        self.register_buffer("_K_cond_eff", K_cond.detach(), persistent=False)
+        self._coupling_cache_valid = True
+
     @property
     def state_dim(self) -> int:
         """Total state dimension (main + cond)."""
@@ -166,8 +174,8 @@ class ConditionalKuramotoDynamics(nn.Module):
         sin_m = torch.sin(theta_main)
         cos_m = torch.cos(theta_main)
         drive = drive * self._K_drive_scale
-        drive_sin = torch.einsum("bnm,bm->bn", drive, sin_c)
-        drive_cos = torch.einsum("bnm,bm->bn", drive, cos_c)
+        drive_sin = torch.bmm(drive, sin_c.unsqueeze(-1)).squeeze(-1)
+        drive_cos = torch.bmm(drive, cos_c.unsqueeze(-1)).squeeze(-1)
         main_vel = main_vel + cos_m * drive_sin - sin_m * drive_cos
 
         return torch.cat([main_vel, cond_vel], dim=1)
@@ -483,7 +491,10 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
             from un0.common import best_available_device
 
             device = best_available_device()
-        return model.to(device)
+        model = model.to(device)
+        model.eval()
+        model.dynamics.bake_coupling_cache()
+        return model
 
 
 def prepare_class_ids_for_generation(

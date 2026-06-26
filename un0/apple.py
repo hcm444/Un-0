@@ -19,6 +19,10 @@ _PRESET_OVERRIDES: dict[InferencePreset, dict[str, int | str | None]] = {
     "fast": {"num_steps": 10, "solver": "euler"},
 }
 
+_AUTOTUNE_MAX_BATCH = 256
+_AUTOTUNE_MIN_BATCH = 4
+_AUTOTUNE_CACHE: dict[int, int] = {}
+
 
 def is_apple_silicon() -> bool:
     """Return True when PyTorch can run kernels on the Metal backend."""
@@ -29,9 +33,7 @@ def configure_apple_runtime() -> None:
     """Tune PyTorch for sustained MPS inference workloads."""
     if not is_apple_silicon():
         return
-    # Use all available unified memory before paging; default cap can throttle GPU work.
     os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
-    # Prefer tensor-core friendly fp32 matmuls on Apple Silicon.
     torch.set_float32_matmul_precision("high")
 
 
@@ -44,8 +46,14 @@ def synchronize_device(device: torch.device | str) -> None:
         torch.cuda.synchronize()
 
 
+def prepare_model_for_inference(model: ConditionalImplicitKuramotoGenerator) -> None:
+    """Apply one-time inference optimizations (eval mode, baked coupling cache)."""
+    model.eval()
+    model.dynamics.bake_coupling_cache()
+
+
 def default_inference_batch_size(model: ConditionalImplicitKuramotoGenerator) -> int:
-    """Pick a batch size that keeps MPS busy without exhausting unified memory."""
+    """Return a conservative batch size before autotuning."""
     n_oscillators = int(model.dynamics.n)
     if n_oscillators >= 16_384:
         return 8
@@ -54,6 +62,59 @@ def default_inference_batch_size(model: ConditionalImplicitKuramotoGenerator) ->
     if n_oscillators >= 4096:
         return 64
     return 32
+
+
+def _probe_inference_batch(
+    model: ConditionalImplicitKuramotoGenerator,
+    device: torch.device,
+    batch_size: int,
+) -> bool:
+    """Return True if a single forward pass succeeds at this batch size."""
+    num_classes = int(model.dynamics.num_classes)
+    class_ids = (torch.arange(batch_size, device=device, dtype=torch.long) % num_classes)
+    try:
+        model.sample(class_ids)
+        synchronize_device(device)
+    except RuntimeError:
+        return False
+    return True
+
+
+def autotune_inference_batch_size(
+    model: ConditionalImplicitKuramotoGenerator,
+    device: torch.device,
+    *,
+    max_batch: int = _AUTOTUNE_MAX_BATCH,
+) -> int:
+    """Find the largest micro-batch that fits on the active accelerator."""
+    if device.type not in ("mps", "cuda"):
+        return default_inference_batch_size(model)
+
+    cached = _AUTOTUNE_CACHE.get(id(model))
+    if cached is not None:
+        return int(cached)
+
+    prepare_model_for_inference(model)
+    start = default_inference_batch_size(model)
+    upper = start
+    while upper < max_batch and _probe_inference_batch(model, device, upper * 2):
+        upper *= 2
+
+    if not _probe_inference_batch(model, device, upper):
+        upper = max(_AUTOTUNE_MIN_BATCH, upper // 2)
+
+    lo, hi = _AUTOTUNE_MIN_BATCH, upper
+    best = lo if _probe_inference_batch(model, device, lo) else _AUTOTUNE_MIN_BATCH
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if _probe_inference_batch(model, device, mid):
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    _AUTOTUNE_CACHE[id(model)] = int(best)
+    return int(best)
 
 
 def apply_inference_preset(
@@ -98,6 +159,7 @@ def sample_batched(
     class_ids: Tensor,
     *,
     batch_size: int,
+    group_by_class: bool = True,
 ) -> Tensor:
     """Generate samples in fixed-size chunks for better MPS utilization."""
     if batch_size <= 0:
@@ -106,6 +168,19 @@ def sample_batched(
     if class_ids.numel() == 0:
         msg = "class_ids must not be empty."
         raise ValueError(msg)
+
+    if group_by_class and int(class_ids.shape[0]) > 1:
+        order = torch.argsort(class_ids)
+        sorted_ids = class_ids[order]
+        sorted_samples = sample_batched(
+            model,
+            sorted_ids,
+            batch_size=batch_size,
+            group_by_class=False,
+        )
+        restored = torch.empty_like(sorted_samples)
+        restored[order] = sorted_samples
+        return restored
 
     chunks: list[Tensor] = []
     for start in range(0, int(class_ids.shape[0]), batch_size):
@@ -125,8 +200,10 @@ def generate_samples(
     num_steps: int | None = None,
     solver: str | None = None,
     preset: InferencePreset | None = None,
+    autotune_batch: bool = True,
 ) -> Tensor:
     """Run class-conditional generation with Apple-friendly defaults."""
+    prepare_model_for_inference(model)
     if preset is not None:
         apply_inference_preset(model, preset)
     if num_steps is not None:
@@ -134,7 +211,13 @@ def generate_samples(
     if solver is not None:
         model.solver = solver  # type: ignore[assignment]
 
-    effective_batch = batch_size or default_inference_batch_size(model)
+    if batch_size > 0:
+        effective_batch = int(batch_size)
+    elif autotune_batch and device.type in ("mps", "cuda"):
+        effective_batch = autotune_inference_batch_size(model, device)
+    else:
+        effective_batch = default_inference_batch_size(model)
+
     if warmup and device.type in ("mps", "cuda"):
         warmup_inference(model, device, batch_size=min(effective_batch, 2))
 

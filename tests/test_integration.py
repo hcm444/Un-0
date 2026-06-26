@@ -44,6 +44,7 @@ def test_integrate_fixed_runs_for_euler_and_rk4() -> None:
 def test_coupling_cache_reused_in_eval_mode() -> None:
     dynamics = _tiny_dynamics()
     dynamics.eval()
+    dynamics.bake_coupling_cache()
     state = torch.randn(1, dynamics.state_dim)
     drive = dynamics.K_drive[torch.tensor([0])]
 
@@ -54,5 +55,13 @@ def test_coupling_cache_reused_in_eval_mode() -> None:
     assert first is second
 
     dynamics.train()
-    dynamics(state, state.new_zeros(()), drive)
     assert dynamics._coupling_cache_valid is False
+
+
+def test_bake_coupling_cache_registers_buffers() -> None:
+    dynamics = _tiny_dynamics()
+    dynamics.eval()
+    dynamics.bake_coupling_cache()
+    assert hasattr(dynamics, "_K_eff")
+    assert hasattr(dynamics, "_K_cond_eff")
+    assert dynamics._coupling_cache_valid is True

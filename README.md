@@ -136,6 +136,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 python scripts/demo.py                     # 5-class preview, best CIFAR checkpoint
 python scripts/demo.py --preset fast       # faster preview
+python scripts/benchmark_apple.py          # ms/image on your machine
 un0-sample --pretrained cifar10/n4096 --classes 0 1 2 3 4 --device mps
 ```
 
@@ -150,8 +151,11 @@ Improvements therefore target the integrator and batching, not the decoder.
 | **Native fixed-step integrator** | Replaced `torchdiffeq.odeint` with an in-repo Euler/RK4 loop that stores only the final state (no trajectory tensor). |
 | **`torch.compile` on the step loop** | On MPS/CUDA in eval mode, the integration loop is compiled per `(solver, num_steps)` for fewer kernel launches (~40% faster integration at moderate batch sizes). |
 | **Coupling-matrix cache** | In eval mode, diagonal-free `K` / `K_cond` are cached instead of recomputed on every dynamics evaluation (~100× per image). |
-| **Batched inference** | Micro-batches sized to the model (up to 64 for `n4096`) keep the GPU busy; per-image cost drops sharply with larger batches on unified memory. |
+| **Batched inference** | Micro-batches autotuned on MPS/CUDA (binary search up to 256); per-image cost keeps falling until memory-bound. |
+| **Class-grouped batches** | Samples sorted by class so each micro-batch shares one `K_drive` — better compile locality. |
+| **Baked coupling buffers** | `K_eff` / `K_cond_eff` registered at `from_pretrained` — no `diag_embed` on first forward. |
 | **Warmup pass** | A short forward pass before user-facing work avoids paying `torch.compile` cost on the first sample. |
+| **Benchmark script** | `python scripts/benchmark_apple.py` reports ms/image per preset on your machine. |
 | **Default checkpoint** | `scripts/demo.py` picks `cifar10/n4096` on Apple Silicon — much sharper than `n1024` at interactive speed. |
 
 **Note:** half-precision (`bf16`) integration was tested and rejected — Kuramoto
