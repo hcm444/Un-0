@@ -91,6 +91,9 @@ extend-ignore = [
     "PLR0913",
     "PLR2004",
 ]
+"un0/integration.py" = [
+    "PLR0913",
+]
 "un0/metrics.py" = [
     "PLC0415",
     "PLR0913",
@@ -107,6 +110,8 @@ extend-ignore = [
 ]
 "un0/model.py" = [
     "D413",
+    "FBT001",
+    "FBT002",
     "N806",
     "PLC0415",
     "PLR0913",

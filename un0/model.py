@@ -8,7 +8,8 @@ from typing import Literal
 
 import torch
 from torch import Tensor, nn
-from torchdiffeq import odeint
+
+from un0.integration import integrate_fixed, integrate_fixed_compiled, use_compiled_integration
 
 Encoding = Literal["raw", "sin", "sin_cos"]
 Relativization = Literal["absolute", "mean_relative", "ref_oscillator", "pairwise"]
@@ -116,6 +117,26 @@ class ConditionalKuramotoDynamics(nn.Module):
         self.K_drive = nn.Parameter(
             init_k_scale * k_drive_init_scale * torch.randn(self.num_classes, self.n, self.n_cond)
         )
+        self._coupling_cache_valid = False
+
+    def train(self, mode: bool = True) -> ConditionalKuramotoDynamics:
+        """Invalidate cached coupling matrices when returning to training mode."""
+        if mode:
+            self._coupling_cache_valid = False
+        return super().train(mode)
+
+    def _coupling_matrices(self) -> tuple[Tensor, Tensor]:
+        """Return diagonal-free scaled coupling matrices, cached in eval mode."""
+        if not self.training and self._coupling_cache_valid:
+            return self._K_eff, self._K_cond_eff
+
+        K = (self.K - torch.diag_embed(self.K.diagonal())) * self._K_scale
+        K_cond = (self.K_cond - torch.diag_embed(self.K_cond.diagonal())) * self._K_cond_scale
+        if not self.training:
+            self._K_eff = K
+            self._K_cond_eff = K_cond
+            self._coupling_cache_valid = True
+        return K, K_cond
 
     @property
     def state_dim(self) -> int:
@@ -127,7 +148,7 @@ class ConditionalKuramotoDynamics(nn.Module):
 
         Args:
             state: Concatenated phases shaped `(batch, n + n_cond)`.
-            _time: Unused (required by torchdiffeq signature).
+            _time: Unused (time argument kept for a uniform velocity signature).
             drive: Per-sample drive matrix shaped `(batch, n, n_cond)`
                 (typically `K_drive[class_id]` with optional zeroing for
                 class dropout).
@@ -135,10 +156,7 @@ class ConditionalKuramotoDynamics(nn.Module):
         theta_main = state[:, : self.n]
         theta_cond = state[:, self.n :]
 
-        # Subtract the learned diagonal so oscillators don't self-couple.
-        # Gradient matches masked_fill: zero on diagonal, full off-diagonal.
-        K = (self.K - torch.diag_embed(self.K.diagonal())) * self._K_scale
-        K_cond = (self.K_cond - torch.diag_embed(self.K_cond.diagonal())) * self._K_cond_scale
+        K, K_cond = self._coupling_matrices()
 
         main_vel = _kuramoto_velocity(theta_main, self.omega, K)
         cond_vel = _kuramoto_velocity(theta_cond, self.omega_cond, K_cond)
@@ -317,15 +335,35 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
         self.integration_time = float(integration_time)
         self.num_steps = int(num_steps)
         self.solver = solver
+        self.default_num_steps = int(num_steps)
+        self.default_solver = solver
 
-    def _time_grid(self, device: torch.device, dtype: torch.dtype) -> Tensor:
-        return torch.linspace(
-            0.0,
-            self.integration_time,
-            self.num_steps + 1,
+    def _step_size(self, *, device: torch.device, dtype: torch.dtype) -> Tensor:
+        """Return the fixed integration step as a 0-d tensor on the active device."""
+        return torch.tensor(
+            self.integration_time / self.num_steps,
             device=device,
             dtype=dtype,
         )
+
+    def _integrate_fixed(self, initial_state: Tensor, drive: Tensor) -> Tensor:
+        """Integrate Kuramoto dynamics with a fixed-step Euler or RK4 loop."""
+        if self.solver not in ("euler", "rk4"):
+            msg = f"Unsupported solver {self.solver!r}; expected 'euler' or 'rk4'."
+            raise ValueError(msg)
+
+        step_size = self._step_size(device=initial_state.device, dtype=initial_state.dtype)
+        kwargs = {
+            "dynamics": self.dynamics,
+            "initial_state": initial_state,
+            "drive": drive,
+            "step_size": step_size,
+            "num_steps": self.num_steps,
+            "solver": self.solver,
+        }
+        if use_compiled_integration(initial_state.device, training=self.training):
+            return integrate_fixed_compiled(**kwargs)
+        return integrate_fixed(**kwargs)
 
     def _sample_initial_state(
         self,
@@ -382,15 +420,7 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
             final_state = initial_state
         else:
             drive = self._class_drive(class_id, generator=generator)
-            time_grid = self._time_grid(device=param.device, dtype=param.dtype)
-            states = odeint(
-                lambda t, state: self.dynamics(state, t, drive),
-                initial_state,
-                time_grid,
-                method=self.solver,
-                options={"step_size": self.integration_time / self.num_steps},
-            )
-            final_state = states[-1]
+            final_state = self._integrate_fixed(initial_state, drive)
         main_phases = final_state[:, : self.dynamics.n]
         return self.decoder(self.readout(main_phases))
 

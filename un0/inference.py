@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the compile/warmup pass before generating.",
     )
+    parser.add_argument(
+        "--preset",
+        choices=("quality", "balanced", "fast"),
+        default=None,
+        help="Quality/speed preset (overrides --num-steps and --solver when set).",
+    )
     return parser
 
 
@@ -109,6 +115,7 @@ def generate(args: argparse.Namespace) -> None:
         warmup=not args.no_warmup,
         num_steps=args.num_steps,
         solver=args.solver,
+        preset=args.preset,
     )
     image_size = round((samples.shape[1] // 3) ** 0.5)
     save_sample_grid(

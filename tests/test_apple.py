@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from un0.apple import (
+    apply_inference_preset,
     default_inference_batch_size,
     default_pretrained_checkpoint,
     generate_samples,
@@ -19,14 +20,18 @@ def _mock_model(*, n_oscillators: int = 1024, num_classes: int = 10) -> MagicMoc
     model = MagicMock()
     model.dynamics.n = n_oscillators
     model.dynamics.num_classes = num_classes
+    model.num_steps = 25
+    model.solver = "rk4"
+    model.default_num_steps = 25
+    model.default_solver = "rk4"
     model.sample.side_effect = lambda ids: torch.zeros(ids.shape[0], 3072)
     return model
 
 
 def test_default_inference_batch_size_scales_with_model() -> None:
     assert default_inference_batch_size(_mock_model(n_oscillators=1024)) == 32
-    assert default_inference_batch_size(_mock_model(n_oscillators=4096)) == 16
-    assert default_inference_batch_size(_mock_model(n_oscillators=16384)) == 4
+    assert default_inference_batch_size(_mock_model(n_oscillators=4096)) == 64
+    assert default_inference_batch_size(_mock_model(n_oscillators=16384)) == 8
 
 
 def test_default_pretrained_checkpoint_prefers_quality_on_mps() -> None:
@@ -59,9 +64,22 @@ def test_generate_samples_applies_fast_overrides() -> None:
         device,
         batch_size=2,
         warmup=False,
-        num_steps=5,
-        solver="euler",
+        preset="fast",
     )
-    assert model.num_steps == 5
+    assert model.num_steps == 10
     assert model.solver == "euler"
     model.sample.assert_called_once()
+
+
+def test_apply_inference_preset_balanced() -> None:
+    model = _mock_model()
+    model.default_num_steps = 25
+    model.default_solver = "rk4"
+    model.num_steps = 25
+    model.solver = "rk4"
+    apply_inference_preset(model, "balanced")
+    assert model.num_steps == 15
+    assert model.solver == "rk4"
+    apply_inference_preset(model, "quality")
+    assert model.num_steps == 25
+    assert model.solver == "rk4"

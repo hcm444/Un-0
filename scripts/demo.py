@@ -73,9 +73,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inference micro-batch size (0 = auto-tune for the loaded model).",
     )
     parser.add_argument(
+        "--preset",
+        choices=("quality", "balanced", "fast"),
+        default="quality",
+        help="Inference quality/speed preset (default: quality).",
+    )
+    parser.add_argument(
         "--fast",
         action="store_true",
-        help="Use euler integration with fewer steps for quicker previews.",
+        help="Shortcut for --preset fast.",
     )
     parser.add_argument(
         "--no-warmup",
@@ -98,16 +104,14 @@ def main() -> None:
     class_ids = torch.tensor(args.classes, device=device, dtype=torch.long).repeat_interleave(
         int(args.samples_per_class)
     )
-    num_steps = 10 if args.fast else None
-    solver = "euler" if args.fast else None
+    preset = "fast" if args.fast else str(args.preset)
     flat = generate_samples(
         model,
         class_ids,
         device,
         batch_size=int(args.batch_size),
         warmup=not args.no_warmup,
-        num_steps=num_steps,
-        solver=solver,
+        preset=preset,  # type: ignore[arg-type]
     )
     size = round((flat.shape[1] // 3) ** 0.5)
     images = flat.reshape(-1, 3, size, size)

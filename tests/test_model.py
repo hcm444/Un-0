@@ -256,6 +256,36 @@ def test_generator_defaults_to_rk4_integration() -> None:
     assert model.solver == "rk4"
 
 
+@pytest.mark.parametrize("solver", ["euler", "rk4"])
+def test_fixed_integrator_matches_torchdiffeq(solver: str) -> None:
+    """Native fixed-step integration matches torchdiffeq on tiny dynamics."""
+    from torchdiffeq import odeint
+
+    torch.manual_seed(0)
+    model, _, _ = _tiny_generator(num_steps=4, solver=solver)
+    class_id = torch.tensor([0, 1, 2])
+    drive = model.dynamics.K_drive[class_id]
+    initial = model._sample_initial_state(3, device=torch.device("cpu"), dtype=torch.float32)
+
+    native = model._integrate_fixed(initial, drive)
+    time_grid = torch.linspace(0.0, model.integration_time, model.num_steps + 1)
+    step_size = model.integration_time / model.num_steps
+    reference = odeint(
+        lambda t, state: model.dynamics(state, t, drive),
+        initial,
+        time_grid,
+        method=solver,
+        options={"step_size": step_size},
+    )[-1]
+
+    torch.testing.assert_close(
+        native,
+        reference,
+        rtol=1e-5 if solver == "euler" else 1e-3,
+        atol=1e-6 if solver == "euler" else 2e-4,
+    )
+
+
 def test_generator_euler_integration_runs_and_backprops() -> None:
     """Euler integration (the ImageNet-64 setting) produces images and gradients."""
     dynamics = ConditionalKuramotoDynamics(

@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import Tensor
 
 if TYPE_CHECKING:
     from un0.model import ConditionalImplicitKuramotoGenerator
+
+InferencePreset = Literal["quality", "balanced", "fast"]
+
+_PRESET_OVERRIDES: dict[InferencePreset, dict[str, int | str | None]] = {
+    "quality": {},
+    "balanced": {"num_steps": 15, "solver": "rk4"},
+    "fast": {"num_steps": 10, "solver": "euler"},
+}
 
 
 def is_apple_silicon() -> bool:
@@ -40,12 +48,29 @@ def default_inference_batch_size(model: ConditionalImplicitKuramotoGenerator) ->
     """Pick a batch size that keeps MPS busy without exhausting unified memory."""
     n_oscillators = int(model.dynamics.n)
     if n_oscillators >= 16_384:
-        return 4
-    if n_oscillators >= 10_240:
         return 8
-    if n_oscillators >= 4096:
+    if n_oscillators >= 10_240:
         return 16
+    if n_oscillators >= 4096:
+        return 64
     return 32
+
+
+def apply_inference_preset(
+    model: ConditionalImplicitKuramotoGenerator,
+    preset: InferencePreset,
+) -> None:
+    """Apply a quality/speed preset by overriding solver integration settings."""
+    if preset == "quality":
+        model.num_steps = int(model.default_num_steps)
+        model.solver = model.default_solver
+        return
+
+    overrides = _PRESET_OVERRIDES[preset]
+    if overrides["num_steps"] is not None:
+        model.num_steps = int(overrides["num_steps"])
+    if overrides["solver"] is not None:
+        model.solver = str(overrides["solver"])  # type: ignore[assignment]
 
 
 def default_pretrained_checkpoint() -> str:
@@ -99,8 +124,11 @@ def generate_samples(
     warmup: bool = True,
     num_steps: int | None = None,
     solver: str | None = None,
+    preset: InferencePreset | None = None,
 ) -> Tensor:
     """Run class-conditional generation with Apple-friendly defaults."""
+    if preset is not None:
+        apply_inference_preset(model, preset)
     if num_steps is not None:
         model.num_steps = int(num_steps)
     if solver is not None:

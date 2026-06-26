@@ -39,12 +39,25 @@ comparable. See [Evaluation](#evaluation) for both methodologies.
 
 ## Setup
 
-Requires Python ≥ 3.11 and PyTorch ≥ 2.11; a CUDA GPU is recommended. Install
-with [uv](https://docs.astral.sh/uv/):
+Requires Python ≥ 3.11 and PyTorch ≥ 2.11; a CUDA GPU is recommended for
+training. **Inference also runs on Apple Silicon (MPS)** — see
+[Apple Silicon (MPS)](#apple-silicon-mps).
+
+Install with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync --group dev
 ```
+
+On a Mac without `uv`, use a venv and pip:
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Optional extras via pip: `pip install -e ".[dev]"` (pytest, ruff),
+`pip install -e ".[eval]"` (clean-fid), `pip install -e ".[logging]"` (wandb).
 
 Two optional dependency groups are pulled in only when you need them:
 
@@ -113,26 +126,63 @@ both tasks.
 ### Apple Silicon (MPS)
 
 This fork adds first-class support for **Apple Silicon Macs** using PyTorch's
-Metal backend (MPS). Device selection prefers CUDA, then MPS, then CPU, and
-inference is tuned for unified memory:
+Metal backend (MPS). On a Mac, generation runs on the GPU automatically
+(`--device auto` prefers CUDA, then MPS, then CPU).
 
-- **Auto device** — `--device auto` runs on the GPU when MPS is available.
-- **Batched inference** — samples are generated in micro-batches sized to the
-  loaded model so the GPU stays busy without running out of memory.
-- **Warmup** — a short compile/warmup pass avoids a slow first image.
-- **Better defaults** — `scripts/demo.py` picks `cifar10/n4096` on Apple
-  Silicon for higher-quality previews at interactive speed.
-
-Quick start on a Mac:
+#### Quick start
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python scripts/demo.py
+python scripts/demo.py                     # 5-class preview, best CIFAR checkpoint
+python scripts/demo.py --preset fast       # faster preview
+un0-sample --pretrained cifar10/n4096 --classes 0 1 2 3 4 --device mps
 ```
 
-For faster (lower-quality) previews, pass `--fast` (euler solver, fewer steps).
-The inference CLI also accepts `--batch-size`, `--solver`, and `--num-steps`.
+#### What we found (profiling on MPS)
+
+Generation is dominated by **Kuramoto ODE integration**, not the conv decoder.
+On `cifar10/n4096` the split is roughly **90% integration / 10% decoder**.
+Improvements therefore target the integrator and batching, not the decoder.
+
+| Change | Effect |
+| --- | --- |
+| **Native fixed-step integrator** | Replaced `torchdiffeq.odeint` with an in-repo Euler/RK4 loop that stores only the final state (no trajectory tensor). |
+| **`torch.compile` on the step loop** | On MPS/CUDA in eval mode, the integration loop is compiled per `(solver, num_steps)` for fewer kernel launches (~40% faster integration at moderate batch sizes). |
+| **Coupling-matrix cache** | In eval mode, diagonal-free `K` / `K_cond` are cached instead of recomputed on every dynamics evaluation (~100× per image). |
+| **Batched inference** | Micro-batches sized to the model (up to 64 for `n4096`) keep the GPU busy; per-image cost drops sharply with larger batches on unified memory. |
+| **Warmup pass** | A short forward pass before user-facing work avoids paying `torch.compile` cost on the first sample. |
+| **Default checkpoint** | `scripts/demo.py` picks `cifar10/n4096` on Apple Silicon — much sharper than `n1024` at interactive speed. |
+
+**Note:** half-precision (`bf16`) integration was tested and rejected — Kuramoto
+phase dynamics go unstable under `bf16` autocast. Stay in `fp32` for the ODE.
+
+**Note:** released checkpoints carry their own `num_steps` / `solver` in the
+saved config (e.g. `cifar10/n4096` ships as **euler, 10 steps**), which may
+differ from the builder defaults in `build_cifar10_model()`. The `quality`
+preset restores those checkpoint values; `balanced` and `fast` override them.
+
+#### Inference presets
+
+| Preset | Steps | Solver | Use case |
+| --- | --- | --- | --- |
+| `quality` | checkpoint default | checkpoint default | best match to released weights |
+| `balanced` | 15 | rk4 | middle ground (triggers a new compile on first run) |
+| `fast` | 10 | euler | quickest previews |
+
+```bash
+python scripts/demo.py --preset quality    # default
+python scripts/demo.py --preset balanced
+python scripts/demo.py --fast              # same as --preset fast
+```
+
+The inference CLI (`un0-sample` / `un0/inference.py`) also accepts
+`--batch-size`, `--solver`, `--num-steps`, and `--preset`.
+
+#### Apple-specific modules
+
+- `un0/apple.py` — MPS runtime tuning, batched generation, presets, warmup
+- `un0/integration.py` — eager and compiled fixed-step integrators
 
 ## Training
 
