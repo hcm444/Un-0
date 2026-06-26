@@ -39,13 +39,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSON path. Writes {fid, checkpoint, num_samples, seed}.",
     )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        choices=("auto", "cuda", "mps", "cpu"),
+        help="Device for generation (default: auto — CUDA, then MPS, then CPU).",
+    )
     return parser
 
 
 def evaluate(args: argparse.Namespace) -> float:
     """Load checkpoint, compute FID, return the scalar."""
     seed_everything(int(args.seed))
-    device = resolve_device("auto")
+    device = resolve_device(str(args.device))
     disable_torchscript_gpu_fuser_on_blackwell()
 
     state = torch.load(args.checkpoint, map_location=device, weights_only=True)

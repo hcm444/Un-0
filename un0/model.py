@@ -394,7 +394,7 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
         main_phases = final_state[:, : self.dynamics.n]
         return self.decoder(self.readout(main_phases))
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample(
         self,
         class_id: Tensor,
@@ -409,7 +409,7 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
         finally:
             self.train(was_training)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample_images(
         self,
         class_id: Tensor,
@@ -450,7 +450,9 @@ class ConditionalImplicitKuramotoGenerator(nn.Module):
         model = build_from_config(builder, state["config"])
         model.load_state_dict(state["model"])
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            from un0.common import best_available_device
+
+            device = best_available_device()
         return model.to(device)
 
 

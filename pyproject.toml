@@ -25,6 +25,21 @@ dependencies = [
 Homepage = "https://unconv.ai"
 Repository = "https://github.com/unconv-ai/Un-0"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.14.5",
+]
+logging = [
+    "wandb>=0.20.0",
+]
+eval = [
+    "clean-fid>=0.1.35",
+]
+
+[project.scripts]
+un0-sample = "un0.inference:main"
+
 [dependency-groups]
 test = [
     "pytest>=8.0.0",
@@ -72,6 +87,10 @@ extend-ignore = [
 "un0/inference.py" = [
     "D103",
 ]
+"un0/apple.py" = [
+    "PLR0913",
+    "PLR2004",
+]
 "un0/metrics.py" = [
     "PLC0415",
     "PLR0913",
@@ -111,7 +130,10 @@ extend-ignore = [
     "PLR0915",
 ]
 "tests/*" = ["ALL"]
-"scripts/precompute_dino_features.py" = [
+"un0/eval.py" = [
+    "D103",
+]
+"scripts/*" = [
     "D103",
     "INP001",
 ]

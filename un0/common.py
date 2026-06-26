@@ -28,10 +28,25 @@ def seed_everything(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def best_available_device() -> torch.device:
+    """Return the best accelerator available on this machine."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def resolve_device(device: str) -> torch.device:
-    """Resolve `auto` to CUDA when available."""
+    """Resolve `auto` to CUDA, then MPS, then CPU."""
     if device == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return best_available_device()
+    if device == "mps" and not torch.backends.mps.is_available():
+        msg = "MPS requested but not available on this system."
+        raise RuntimeError(msg)
+    if device == "cuda" and not torch.cuda.is_available():
+        msg = "CUDA requested but not available on this system."
+        raise RuntimeError(msg)
     return torch.device(device)
 
 

@@ -110,6 +110,30 @@ uv run python un0/inference.py \
 `--pretrained` and `--checkpoint` are mutually exclusive; the same CLI serves
 both tasks.
 
+### Apple Silicon (MPS)
+
+This fork adds first-class support for **Apple Silicon Macs** using PyTorch's
+Metal backend (MPS). Device selection prefers CUDA, then MPS, then CPU, and
+inference is tuned for unified memory:
+
+- **Auto device** — `--device auto` runs on the GPU when MPS is available.
+- **Batched inference** — samples are generated in micro-batches sized to the
+  loaded model so the GPU stays busy without running out of memory.
+- **Warmup** — a short compile/warmup pass avoids a slow first image.
+- **Better defaults** — `scripts/demo.py` picks `cifar10/n4096` on Apple
+  Silicon for higher-quality previews at interactive speed.
+
+Quick start on a Mac:
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+python scripts/demo.py
+```
+
+For faster (lower-quality) previews, pass `--fast` (euler solver, fewer steps).
+The inference CLI also accepts `--batch-size`, `--solver`, and `--num-steps`.
+
 ## Training
 
 Training has been verified on **NVIDIA B200, H200, and A100** GPUs.
