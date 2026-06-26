@@ -183,6 +183,36 @@ python scripts/demo.py --fast              # same as --preset fast
 The inference CLI (`un0-sample` / `un0/inference.py`) also accepts
 `--batch-size`, `--solver`, `--num-steps`, and `--preset`.
 
+#### Photomosaic from any photograph
+
+`scripts/create_photomosaic.py` rebuilds a photo from Un-0 tiles: each grid
+cell is a generated sample chosen by average RGB color, with reuse penalties so
+the same tile does not dominate. Tile pools are cached under
+`samples/.photomosaic_pools/` for fast reruns.
+
+```bash
+# Single photo → samples/my_photo_mosaic.png
+python scripts/create_photomosaic.py ~/Pictures/my_photo.jpg
+
+# Several photos at once
+python scripts/create_photomosaic.py photo1.jpg photo2.jpg --output-dir samples/
+
+# Faster preview
+python scripts/create_photomosaic.py photo.jpg --quick
+```
+
+<p align="center">
+  <img src="assets/photomosaic_example.png" width="480" alt="Photomosaic of a cat portrait built from Un-0 CIFAR-10 tiles">
+</p>
+
+| Flag | Effect |
+| --- | --- |
+| `--cols` / `--rows` | Grid size (rows default from aspect ratio) |
+| `--pool-size` | More tiles → better color match (slower first run) |
+| `--preset fast` | Quicker tile generation |
+| `--no-cache-pool` | Force a fresh tile pool |
+| `--pretrained` | Checkpoint for tiles (default `cifar10/n4096` on Mac) |
+
 #### Apple-specific modules
 
 - `un0/apple.py` — MPS runtime tuning, batched generation, presets, warmup

@@ -141,6 +141,8 @@ extend-ignore = [
 "scripts/*" = [
     "D103",
     "INP001",
+    "PLR0913",
+    "PLR2004",
 ]
 
 [tool.pytest.ini_options]
